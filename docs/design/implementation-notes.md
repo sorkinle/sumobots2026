@@ -76,35 +76,26 @@ ADC1 with 11 dB attenuation has a useful range of ~150 mV to ~2.45 V (some calib
 
 ## 3. Toolchain & Project Layout
 
-**Recommended toolchain:** PlatformIO under VS Code. (Arduino IDE also works but PlatformIO gives reproducible builds, library pinning, and cleaner OTA paths in the future.)
+**Toolchain:** **Arduino IDE 2.x** with the ESP32 core. This is the toolchain the project uses.
 
-**`platformio.ini` (essential bits)**
+**Arduino IDE setup**
 
-```ini
-[env:sumobot]
-platform        = espressif32
-board           = esp32dev
-framework       = arduino
-monitor_speed   = 115200
-upload_speed    = 921600
-lib_deps        =
-    https://github.com/ricardoquesada/bluepad32.git
-    https://github.com/ricardoquesada/bluepad32-arduino.git
-build_flags     =
-    -DCORE_DEBUG_LEVEL=2
-    -DARDUINO_USB_CDC_ON_BOOT=0
-    -Os
-```
+1. Install the **ESP32 boards** (Boards Manager → "esp32" by Espressif).
+2. Install **Bluepad32 for Arduino** — follow its "Arduino IDE" guide, which adds a Bluepad32-enabled ESP32
+   board variant plus the `Bluepad32.h` library. Select that board so the ESP32 acts as a BLE host.
+3. Board: **ESP32 Dev Module**; Upload Speed 921600; Serial Monitor 115200 baud.
 
-Bluepad32 ships its own Arduino port; pin the commit you build against.
+Each program is one sketch folder (`firmware/<name>/<name>.ino`). Keep the hardware-independent drive logic in
+plain `.h`/`.cpp` files beside the `.ino` so the same code can be unit-tested on a PC (see section 8).
+
+(PlatformIO can also build this, but Arduino IDE is the supported path.)
 
 **Source tree**
 
 ```
 firmware/
-├── platformio.ini
 ├── src/
-│   ├── main.cpp                 # setup() / loop() — minimal, just runs scheduler
+│   ├── main.cpp / .ino          # setup() / loop() — minimal, just runs scheduler
 │   ├── input/
 │   │   ├── ble_hid.cpp/.h       # Bluepad32 glue; produces ControllerSnapshot
 │   │   └── controller_map.h     # Xbox button → semantic name
@@ -115,8 +106,7 @@ firmware/
 │   │   ├── motor_pair.cpp/.h    # BTS7960 driver, ARMED-gate guard
 │   │   └── status_led.cpp/.h    # LED blink patterns per mode
 │   ├── safety/
-│   │   ├── linkloss.cpp/.h      # FR-006 watchdog
-│   │   └── brownout.cpp/.h      # FR-009 Vbatt monitor (filtered)
+│   │   └── failsafe.cpp/.h      # FR-006 link-loss + FR-009 brownout (one Vbatt IIR)
 │   ├── config/
 │   │   ├── params.cpp/.h        # Tunable struct + defaults + NVS load/save
 │   │   └── nvs_keys.h           # Single source of truth for NVS keys
@@ -125,11 +115,13 @@ firmware/
 │   ├── telemetry/
 │   │   └── telemetry.cpp/.h     # FR-015 snapshot + FR-018 stream
 │   └── util/
-│       └── time_us.h            # esp_timer_get_time() helpers, percentile rb
-└── test/                        # PlatformIO unit tests (Unity) for mixer/state
+│       └── time_us.h            # esp_timer_get_time() helpers
+└── test/                        # host (PC) unit tests for mixer/state (see section 8)
 ```
 
-This layout maps 1-for-1 to the 8 firmware components in `02-software-glance.md`.
+This layout maps 1-for-1 to the 8 firmware components in `02-software-glance.md`. In the Arduino IDE the
+sketch is a folder containing the `.ino` plus these files (kept beside it, or under a `src/` subfolder); host
+tests live in `firmware/test/`.
 
 ---
 
@@ -141,10 +133,10 @@ This layout maps 1-for-1 to the 8 firmware components in `02-software-glance.md`
 
 ```
 every 10 ms:
-    Drain BLE-HID event queue → ControllerSnapshot
-    Update Link-Loss watchdog timestamp (if any event since last tick)
-    Read Vbatt → push into IIR filter
-    state = StateMachine.tick(controller, vbatt_filt, faults)
+    Drain BLE-HID event queue → ControllerSnapshot   (carries last_event_ms)
+    vbatt_filt = iir(vbatt_filt, read_vbatt_raw())   // single Vbatt IIR, one site
+    faults = Failsafe.tick(controller, vbatt_filt, params)
+    state = StateMachine.tick(state, controller, faults, params)
     if state == ARMED:
         (left_cmd, right_cmd) = Mixer.compute(controller, params)
     else:
@@ -263,12 +255,9 @@ void MotorPair::apply(int16_t cmd, bool armed) {
 
 ```cpp
 // control/state_machine.h
-enum class Mode : uint8_t { BOOT, PAIRING, DISARMED, ARMED, FAULT };
+#include "safety/failsafe.h"   // Faults (the failsafe signal)
 
-struct Faults {
-    bool linkloss;
-    bool brownout;
-};
+enum class Mode : uint8_t { BOOT, PAIRING, DISARMED, ARMED, FAULT };
 
 Mode state_machine_tick(Mode current,
                         const ControllerSnapshot& c,
@@ -283,51 +272,45 @@ Mode state_machine_tick(Mode current,
 | BOOT | NVS has no paired controller | PAIRING | FR-007 |
 | BOOT | NVS has paired controller | DISARMED | FR-007 |
 | PAIRING | First valid HID event from new controller | DISARMED | FR-007 |
-| DISARMED | LB+RB+A held continuously ≥ `arm_hold_ms` | ARMED | FR-005 |
+| DISARMED | LB+RB+A held continuously ≥ `arm_hold_ms` (combo fixed in code) | ARMED | FR-005 |
 | ARMED | B pressed (rising edge) | DISARMED | FR-004 |
-| ARMED | `now − last_hid_event_ms ≥ linkloss_timeout_ms` | DISARMED | FR-006 |
-| ARMED | `f.brownout == true` | FAULT | FR-009 |
-| ARMED | `f.linkloss == true` (degenerate: same as ARMED→DISARMED) | DISARMED | FR-006 |
+| ARMED | `f.linkloss` (Failsafe: no HID event for `linkloss_timeout_ms`) | DISARMED | FR-006 |
+| ARMED | `f.brownout` (Failsafe: filtered Vbatt < threshold) | FAULT | FR-009 |
 | FAULT | MENU held ≥ 2 s **AND** `!f.brownout` | DISARMED | FR-019 |
-| (any) | (no input event for `linkloss_timeout_ms` while ARMED) | DISARMED | FR-006 |
 
 **Invariants:**
 
 - `MotorPair::apply(cmd, state == Mode::ARMED)` is the **only** way to call into motor output → FR-010 + NFR-003 are structurally guaranteed.
 - The FAULT state ignores stick/button input for motor control; it accepts only the MENU-hold fault-clear gesture.
 
-### 5.5 Link-Loss Watchdog (FR-006)
+### 5.5 Failsafe / Watchdog (FR-006, FR-009)
+
+One unit (SRS component ⑤) owns both safety monitors and produces the `Faults` signal the State Machine consumes. It holds **no** Vbatt filter of its own — the main loop maintains the single IIR (`vbatt_filt`) and passes it in — so `failsafe_tick` is a pure function of (latest input, filtered Vbatt, params), with nothing to construct or initialize.
 
 ```cpp
-// safety/linkloss.h
-class LinkLoss {
-public:
-    void note_event_now();         // call when any HID event arrives
-    bool check(uint32_t timeout_ms); // true ⇒ link-lost
-private:
-    uint32_t last_event_ms_;
+// safety/failsafe.h
+struct Faults {
+    bool linkloss;   // no HID event for linkloss_timeout_ms
+    bool brownout;   // filtered Vbatt under threshold
 };
+
+Faults failsafe_tick(const ControllerSnapshot& c, float vbatt_filt, const Params& p);
 ```
-
-The State Machine reads `LinkLoss::check(params.linkloss_timeout_ms)` once per tick. Default timeout: **250 ms** (allows 2 missed BLE intervals of typ. 30–50 ms with comfortable margin).
-
-### 5.6 Brownout Monitor (FR-009)
 
 ```cpp
-// safety/brownout.h
-class Brownout {
-public:
-    void update(float v_meas);                 // call once per tick
-    bool triggered(float threshold_v,
-                   uint32_t filter_ms) const;  // true ⇒ brownout
-private:
-    float v_filt_ = 0.0f;            // single-pole IIR
-};
+// safety/failsafe.cpp
+Faults failsafe_tick(const ControllerSnapshot& c, float vbatt_filt, const Params& p) {
+    Faults f;
+    f.linkloss = (millis() - c.last_event_ms) >= p.linkloss_timeout_ms;
+    f.brownout = vbatt_filt < p.vbatt_threshold;
+    return f;
+}
 ```
 
-The filter is a single-pole IIR with α = `tick_ms / (tick_ms + filter_ms)`. Brownout latches in the State Machine; the FR-019 fault-clear gesture is the only exit, and only if `v_filt > threshold`.
+- **Link-loss** default timeout **250 ms** (covers 2 missed BLE intervals of typ. 30–50 ms with margin).
+- **Brownout** reads the loop's single-pole IIR `vbatt_filt` (α = `tick_ms / (tick_ms + filter_ms)`). It latches in the State Machine; the FR-019 fault-clear gesture is the only exit, and only once `vbatt_filt > threshold`.
 
-### 5.7 Status LED (FR-014, NFR-005)
+### 5.6 Status LED (FR-014, NFR-005)
 
 Blink patterns, generated by a 100 ms phase counter:
 
@@ -341,7 +324,7 @@ Blink patterns, generated by a 100 ms phase counter:
 
 All five are distinguishable at 1 m within 1 s of a transition (NFR-005).
 
-### 5.8 Config Store — NVS (FR-016, FR-017, NFR-004)
+### 5.7 Config Store — NVS (FR-016, FR-017, NFR-004)
 
 ```cpp
 // config/params.h
@@ -355,7 +338,6 @@ struct Params {
     float    vbatt_threshold;
     uint16_t vbatt_filter_ms;
     uint16_t linkloss_timeout_ms;
-    uint32_t arm_combo;          // bitfield of required buttons
     uint16_t arm_hold_ms;
     uint16_t telemetry_rate_hz;  // 0 = off
     // pairing state
@@ -381,13 +363,12 @@ bool   params_set_by_name(Params& p, const char* key, const char* val_str);
 | vbatt_threshold | 13.2 V | 11.0–16.8 |
 | vbatt_filter_ms | 500 | 50–5000 |
 | linkloss_timeout_ms | 250 | 50–2000 |
-| arm_combo | LB+RB+A | bitmask |
 | arm_hold_ms | 1000 | 200–5000 |
 | telemetry_rate_hz | 0 | 0–50 |
 
-NVS namespace: `sumobot`. Keys mirror struct field names. Use `Preferences` library or raw `nvs_flash` — `Preferences` is simpler and built into Arduino-ESP32.
+NVS namespace: `sumobot`. Keys mirror struct field names. Use `Preferences` library or raw `nvs_flash` — `Preferences` is simpler and built into Arduino-ESP32. The arm-button combo (LB+RB+A) is fixed in code; only `arm_hold_ms` is tunable.
 
-### 5.9 Serial Console (FR-016)
+### 5.8 Serial Console (FR-016)
 
 **Grammar:** `<verb> [<key>] [<value>]`, newline-terminated. Whitespace-separated.
 
@@ -408,7 +389,7 @@ NVS namespace: `sumobot`. Keys mirror struct field names. Use `Preferences` libr
 
 Implementation: a `command_table[]` of `{verb, min_args, max_args, handler}` is the dispatcher. Unknown verbs print `ERR unknown verb`. Validation errors print `ERR <reason>`. Successes print `OK` (or the requested data).
 
-### 5.10 Telemetry (FR-015, FR-018)
+### 5.9 Telemetry (FR-015, FR-018)
 
 One canonical line format, emitted on `snap` (FR-015) and at `telemetry_rate_hz` (FR-018). Single line, ASCII, KV-separated, easy to grep/script:
 
@@ -435,7 +416,7 @@ Field reference:
 1. Power on. ESP-WROOM-32 boots, `setup()`:
    - Initializes Serial @ 115200, prints banner.
    - Loads `Params` from NVS (or defaults if first boot).
-   - Initializes `MotorPair`s, `StatusLED`, `LinkLoss`, `Brownout`.
+   - Initializes `MotorPair`s and `StatusLED`. (Failsafe is a stateless function — nothing to construct.)
    - Initializes Bluepad32.
    - If `paired_bd_addr == 0` → State = **PAIRING**; else State = **DISARMED**.
 2. Operator turns on Xbox controller. Bluepad32 emits the first HID event. The pairing routine writes the BD address to NVS, transitions to **DISARMED**.
@@ -491,7 +472,7 @@ Do these in order on the bench. Each step gives a binary "go / no-go" before add
 | FR-018 | `tele 20` → 20 lines/s appear on serial |
 | FR-019 | Trigger FAULT, then hold MENU ≥ 2 s → DISARMED |
 
-Unit-testable items (state machine, mixer, command parser) live under `test/` and run with `pio test -e native` against a desktop build.
+Unit-testable items (mixer, state machine, command parser) are written as **Arduino-free C++** and run on the host (PC) — no board required. The connection-test slice ships such tests in `firmware/test/`; build them with any C++17 compiler, e.g. `g++ -std=c++17 -I ../sumobot_connection_test test_drive_logic.cpp ../sumobot_connection_test/drive_logic.cpp -o t && ./t`. Keeping this logic free of Arduino headers is what makes test-driven development practical.
 
 ---
 
@@ -514,15 +495,15 @@ Unit-testable items (state machine, mixer, command parser) live under `test/` an
 | §5.2 Mixer | FR-003, FR-011, FR-012, FR-013 |
 | §5.3 MotorPair | FR-010, NFR-003 |
 | §5.4 State Machine | FR-004, FR-005, FR-006, FR-009, FR-019 |
-| §5.5 LinkLoss | FR-006 |
-| §5.6 Brownout | FR-009 |
-| §5.7 StatusLED | FR-014, NFR-005 |
-| §5.8 Params/NVS | FR-016, FR-017, NFR-004 |
-| §5.9 Serial Console | FR-015, FR-016, FR-018 |
-| §5.10 Telemetry | FR-015, FR-018 |
+| §5.5 Failsafe / Watchdog | FR-006, FR-009 |
+| §5.6 StatusLED | FR-014, NFR-005 |
+| §5.7 Params/NVS | FR-016, FR-017, NFR-004 |
+| §5.8 Serial Console | FR-015, FR-016, FR-018 |
+| §5.9 Telemetry | FR-015, FR-018 |
 
 Every FR/NFR has a home. Every implementation section justifies its existence by citing an FR/NFR.
 
 ---
 *Created: 2026-05-20*
+*Last Updated: 2026-06-17*
 *Author: Project Owner*
