@@ -16,7 +16,8 @@ hardware: ESP-WROOM-32, two BTS7960 H-bridge drivers (one per side, two motors i
 
 Firmware uses the **Arduino IDE** (ESP32 core + the Bluepad32 board/library), **not** PlatformIO. Build and
 flash by opening a sketch folder (e.g. `firmware/sumobot_connection_test/`) in the Arduino IDE and uploading
-to an ESP32 Dev Module. The `docs/` tree is plain Markdown — nothing to build or lint.
+to an ESP32 Dev Module; full IDE/board install and flashing steps are in `firmware/ARDUINO_SETUP.md`. The
+`docs/` tree is plain Markdown — nothing to build or lint.
 
 **Test-driven development is the rule for firmware logic.** Write or update a host test first, watch it fail,
 then implement until it passes. This works because all decision logic (mixing, the ARMED gate) lives in

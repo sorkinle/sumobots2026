@@ -28,11 +28,10 @@ Each BTS7960 drives the two motors on its side in parallel. PWM is 20 kHz, 10-bi
 
 ### Build & flash (Arduino IDE)
 
-1. Install the **ESP32 boards** (Boards Manager → "esp32" by Espressif).
-2. Install **Bluepad32 for Arduino** (follow its Arduino IDE guide; select its ESP32 board variant so the
-   ESP32 acts as a BLE host).
-3. Open `sumobot_connection_test/sumobot_connection_test.ino`, select **ESP32 Dev Module**, and Upload.
-4. Open Serial Monitor at **115200**. Turn on the Xbox controller to pair.
+See **[ARDUINO_SETUP.md](ARDUINO_SETUP.md)** for full IDE install, board-package setup, flashing, pairing,
+and troubleshooting. In short: install the `esp32` **and** `ESP32 + Bluepad32` board packages, open
+`sumobot_connection_test/sumobot_connection_test.ino`, select an **ESP32 + Bluepad32 Arduino** board, and
+Upload; then open Serial Monitor at **115200** and pair the controller.
 
 ### Driving it — and safety
 

@@ -85,6 +85,9 @@ ADC1 with 11 dB attenuation has a useful range of ~150 mV to ~2.45 V (some calib
    board variant plus the `Bluepad32.h` library. Select that board so the ESP32 acts as a BLE host.
 3. Board: **ESP32 Dev Module**; Upload Speed 921600; Serial Monitor 115200 baud.
 
+Full step-by-step setup (board-manager URLs, the "ESP32 + Bluepad32" board-group gotcha, flashing, pairing,
+and troubleshooting) lives in `../../firmware/ARDUINO_SETUP.md`.
+
 Each program is one sketch folder (`firmware/<name>/<name>.ino`). Keep the hardware-independent drive logic in
 plain `.h`/`.cpp` files beside the `.ino` so the same code can be unit-tested on a PC (see section 8).
 
