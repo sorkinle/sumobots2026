@@ -84,12 +84,23 @@ void setup() {
 void loop() {
     BP32.update();
 
-    ControllerSnapshot snap;  // default: invalid, all-zero
-    bool armed = false;
-    if (g_ctl && g_ctl->isConnected() && g_ctl->hasData() && g_ctl->isGamepad()) {
-        snap = snapshotFrom(g_ctl);
-        // Connection-test arming: hold BOTH shoulders to allow motion.
-        armed = (snap.buttons & (btn::LB | btn::RB)) == (btn::LB | btn::RB);
+    // Static: hold last-known controller state across frames where hasData() is
+    // false (BT sends at ~20-50 Hz but loop runs at ~100 Hz). Without this the
+    // motors get pulsed ON/OFF causing flickering.
+    static ControllerSnapshot snap;  // default: invalid, all-zero
+    static bool armed = false;
+
+    if (g_ctl && g_ctl->isConnected()) {
+        if (g_ctl->hasData() && g_ctl->isGamepad()) {
+            snap = snapshotFrom(g_ctl);
+            // Connection-test arming: hold BOTH shoulders to allow motion.
+            armed = (snap.buttons & (btn::LB | btn::RB)) == (btn::LB | btn::RB);
+        }
+        // else: no new data this frame — keep previous snap & armed state
+    } else {
+        // Controller disconnected — zero everything.
+        snap = ControllerSnapshot{};
+        armed = false;
     }
 
     const DriveOutput out = drive_pipeline(snap, g_params, armed);
