@@ -6,7 +6,7 @@
 
 **For** hobby combat-robotics builders **who** want to drive a custom 4-motor tank-drive sumobot from an Xbox controller without writing firmware from scratch,
 **the** ESP32 Sumobot Firmware **is a** purpose-built embedded control program
-**that** turns a fixed bill of materials (ESP-WROOM-32 + two BTS7960 drivers + four Pololu 37D gearmotors + 4S LiPo) into a safe, low-latency, tunable, push-only sumobot driven over Bluetooth-LE.
+**that** turns a fixed bill of materials (ESP-WROOM-32 + two ZK-BM1 dual-channel drivers + four Pololu 37D gearmotors + 3S LiPo) into a safe, low-latency, tunable, push-only sumobot driven over Bluetooth-LE.
 **Unlike** a generic RC-car sketch or a hand-rolled motor driver loop, **our firmware** treats safety (arm/disarm + link-loss + brownout failsafe) as a first-class concern, exposes runtime tuning over USB-serial, and persists configuration in NVS so the operator can iterate on "feel" without re-flashing.
 
 ## Goals (Quantified)
@@ -16,7 +16,7 @@
 | G1 | End-to-end input → motor-output latency | ≤ 50 ms (controller HID report received → PWM duty updated) |
 | G2 | Link-loss → motors-off time | ≤ 250 ms after last received HID report |
 | G3 | Automatic BLE reconnect after dropout | ≤ 5 s under normal RF conditions |
-| G4 | Brownout cut-off | Vbatt < configurable threshold (default ≈ 13.2 V for 4S, i.e. 3.3 V/cell) |
+| G4 | Brownout cut-off | Vbatt < configurable threshold (default ≈ 9.9 V for 3S, i.e. 3.3 V/cell) |
 | G5 | Tuning round-trip (change value → effect on bot) | No reflash; serial command, persist to NVS, immediate effect |
 | G6 | Time-to-arm from cold boot (battery plug-in to ARMED-ready) | ≤ 15 s including BLE connection |
 
@@ -38,7 +38,7 @@
 |---|---------|--------|
 | F1 | Bluetooth-LE pairing and auto-reconnect with an Xbox Series controller | CN.5 |
 | F2 | Stick/trigger → per-side wheel command (tank or arcade mapping) | CN.8, CN.9 |
-| F3 | PWM + direction output for two BTS7960 drivers (left side + right side) | CN.1, CN.2 |
+| F3 | PWM + direction output for two ZK-BM1 drivers (left side + right side) | CN.1, CN.2 |
 | F4 | ARM / DISARM state machine gated by explicit operator action | CN.7 |
 | F5 | Emergency-stop on dedicated controller button | CN.3 |
 | F6 | Link-loss failsafe (motors-off on heartbeat timeout) | CN.4 |
@@ -59,7 +59,7 @@
 | F13 | Configurable acceleration slew (rate-limit on per-side output changes) | CP.5, CP.6 (tuning) |
 | F14 | Configurable response curve (linear / expo) | CN.9 |
 | F15 | LED brightness or RGB color codes (instead of monochrome blink patterns) | CP.7 |
-| F16 | Driver thermal / over-current protection via BTS7960 IS pin | CP.5 (open question in 00-context.md) |
+| F16 | Driver thermal / over-current protection | CP.5 (deferred — ZK-BM1 has no current-sense pin) |
 | F17 | Telemetry also broadcast over BLE or secondary UART | CP.9 (open question in 00-context.md) |
 
 ### Won't Have (this release)
@@ -77,7 +77,7 @@
 The firmware is organized into **8 single-responsibility components**, communicating through narrow internal interfaces, with a **strict safety invariant**: operator input reaches motor outputs **only** through the State Machine's `ARMED` gate; the Failsafe can force motors-off without input-pipeline cooperation.
 
 ```
-Xbox  ──BLE──►  ① BLE Controller  ─►  ② Drive Mixer  ─►  ③ Motor Output Driver  ─► BTS7960 ×2 ─► Motors
+Xbox  ──BLE──►  ① BLE Controller  ─►  ② Drive Mixer  ─►  ③ Motor Output Driver  ─► ZK-BM1 ×2 ─► Motors
                                               ▲                    ▲
                                               │                    │ gate (ARMED?)
                             ⑥ Config Store ──┘           ④ State Machine ◄─── ⑤ Failsafe ◄── Vbatt
@@ -118,7 +118,7 @@ Xbox  ──BLE──►  ① BLE Controller  ─►  ② Drive Mixer  ─►  �
 ## Resolved Decisions (before Step 5)
 
 1. **BLE-HID library:** Bluepad32
-2. **BTS7960 IS-pin current sensing:** Deferred to v2 (brownout failsafe covers the dominant failure mode for v1)
+2. **ZK-BM1 current sensing:** Not available — ZK-BM1 has no IS pin; brownout failsafe covers the dominant failure mode for v1
 3. **LED pattern vocabulary:** Monochrome blink patterns on onboard GPIO LED
 4. **Telemetry transport:** USB-serial only for v1
 
@@ -135,4 +135,4 @@ Xbox  ──BLE──►  ① BLE Controller  ─►  ② Drive Mixer  ─►  �
 
 ---
 *Created: 2026-05-20*
-*Last Updated: 2026-05-20*
+*Last Updated: 2026-06-26*

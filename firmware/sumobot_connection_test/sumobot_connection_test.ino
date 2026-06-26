@@ -1,6 +1,6 @@
 // sumobot_connection_test.ino
 //
-// Connection test ONLY: Xbox controller (Bluetooth LE) -> ESP32 -> BTS7960
+// Connection test ONLY: Xbox controller (Bluetooth LE) -> ESP32 -> ZK-BM1
 // drivers -> motors. It proves the end-to-end drive path and nothing else
 // (no arm/disarm state machine, failsafe, telemetry, or NVS yet).
 //
@@ -14,11 +14,15 @@
 #include "drive_logic.h"
 #include "motor_pair.h"
 
-// ---- Pin map (docs/design/implementation-notes.md section 2) --------------
-constexpr int L_RPWM = 25, L_LPWM = 26, L_EN = 27;   // left side
-constexpr int R_RPWM = 32, R_LPWM = 33, R_EN = 14;   // right side
-constexpr uint8_t L_CH_R = 0, L_CH_L = 1;            // LEDC channels (core 2.x)
-constexpr uint8_t R_CH_R = 2, R_CH_L = 3;
+// ---- Pin map (ZK-BM1 dual-channel drivers) --------------------------------
+// Left ZK-BM1:  ESP32 GPIO -> Driver pin
+//   GPIO 4  -> IN1    GPIO 18 -> IN2    GPIO 19 -> IN3    GPIO 21 -> IN4
+constexpr int L_M1_FWD = 4,  L_M1_REV = 18;
+constexpr int L_M2_FWD = 19, L_M2_REV = 21;
+// Right ZK-BM1: ESP32 GPIO -> Driver pin
+//   GPIO 25 -> IN1    GPIO 26 -> IN2    GPIO 32 -> IN3    GPIO 33 -> IN4
+constexpr int R_M1_FWD = 25, R_M1_REV = 26;
+constexpr int R_M2_FWD = 32, R_M2_REV = 33;
 
 MotorPair g_left, g_right;
 DriveParams g_params;            // compiled-in defaults (see drive_logic.h)
@@ -73,8 +77,8 @@ void setup() {
     Serial.begin(115200);
     Serial.println("Sumobot connection test - hold LB+RB to arm");
 
-    g_left.begin(L_RPWM, L_LPWM, L_EN, L_CH_R, L_CH_L);
-    g_right.begin(R_RPWM, R_LPWM, R_EN, R_CH_R, R_CH_L);
+    g_left.begin(L_M1_FWD, L_M1_REV, L_M2_FWD, L_M2_REV, 0, 1, 2, 3);
+    g_right.begin(R_M1_FWD, R_M1_REV, R_M2_FWD, R_M2_REV, 4, 5, 6, 7);
 
     // If pairing ever gets stuck during bring-up, uncomment once to wipe keys:
     // BP32.forgetBluetoothKeys();
@@ -89,18 +93,25 @@ void loop() {
     // motors get pulsed ON/OFF causing flickering.
     static ControllerSnapshot snap;  // default: invalid, all-zero
     static bool armed = false;
+    static uint32_t last_data_ms = 0;
+
+    constexpr uint32_t kTimeoutMs = 5000;  // failsafe: stop if no data for 5 seconds
 
     if (g_ctl && g_ctl->isConnected()) {
         if (g_ctl->hasData() && g_ctl->isGamepad()) {
             snap = snapshotFrom(g_ctl);
-            // Connection-test arming: hold BOTH shoulders to allow motion.
             armed = (snap.buttons & (btn::LB | btn::RB)) == (btn::LB | btn::RB);
+            last_data_ms = millis();
+        } else if (last_data_ms > 0 && millis() - last_data_ms > kTimeoutMs) {
+            // No fresh data for too long — failsafe stop.
+            snap = ControllerSnapshot{};
+            armed = false;
         }
-        // else: no new data this frame — keep previous snap & armed state
     } else {
         // Controller disconnected — zero everything.
         snap = ControllerSnapshot{};
         armed = false;
+        last_data_ms = 0;
     }
 
     const DriveOutput out = drive_pipeline(snap, g_params, armed);

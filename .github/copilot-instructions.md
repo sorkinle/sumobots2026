@@ -9,8 +9,8 @@ Most of the spec is still unimplemented — treat `docs/design/implementation-no
 blueprint for anything you add.
 
 The product (per the spec): an Xbox-controller-driven, 4-motor tank-drive, **push-only** sumobot. Fixed
-hardware: ESP-WROOM-32, two BTS7960 H-bridge drivers (one per side, two motors in parallel each), 4× Pololu
-37D gearmotors, 4S LiPo + LM2596 buck. Input is an Xbox Series controller over **Bluetooth LE** via Bluepad32.
+hardware: ESP-WROOM-32, two ZK-BM1 dual-channel H-bridge drivers (one per side, one channel per motor), 4× Pololu
+37D gearmotors, 3S LiPo + LM2596 buck. Input is an Xbox Series controller over **Bluetooth LE** via Bluepad32.
 
 ## Build, test, and TDD
 
@@ -74,4 +74,4 @@ grep-verifiable, covered by a state-injection unit test). Anything other than `A
 
 Out of scope by design — don't add them without an explicit spec change: autonomy / opponent detection, edge/line
 detection, weapon control (the bot is push-only), OTA updates, mobile app, and cloud features. Current sensing
-(BTS7960 IS pins) and non-USB telemetry are explicitly deferred to v2.
+and non-USB telemetry are explicitly deferred to v2.

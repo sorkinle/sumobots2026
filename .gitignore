@@ -1,0 +1,11 @@
+# Build artifacts
+*.exe
+*.pdb
+*.o
+*.obj
+
+# Logs
+logs/
+
+# Arduino build
+build/

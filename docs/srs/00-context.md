@@ -18,7 +18,7 @@ The hardware design is fixed and parts have been selected. There is no existing 
 ### In Scope (firmware)
 - Bluetooth LE pairing/reconnect with an Xbox Series controller
 - Stick/trigger → tank-drive motor mixing
-- PWM + direction control for two BTS7960 H-bridge drivers (one per side, two motors in parallel per driver)
+- PWM + direction control for two ZK-BM1 dual-channel H-bridge drivers (one per side, one channel per motor)
 - Arm/disarm state machine with operator-initiated emergency stop
 - Connection-loss failsafe (motors stop)
 - Status feedback via on-board LED (and optionally serial log)
@@ -40,16 +40,16 @@ The hardware design is fixed and parts have been selected. There is no existing 
 |-----------|----:|-------|
 | Pololu 37D 30:1 metal gearmotor (12 V, helical pinion) | 4 | Two per side, mechanically coupled to one wheel each |
 | Pololu stamped aluminum L-bracket for 37D motors | 4 | Mounting hardware |
-| BTS7960 H-bridge motor driver | 2 | One per side; each drives 2 motors wired in parallel |
+| ZK-BM1 dual-channel H-bridge motor driver | 2 | One per side; each channel drives one motor |
 | ESP-WROOM-32 dev board (WiFi + BLE, dual-core) | 1 | Main MCU |
-| SUNPADOW 14.8 V 4S LiPo, 25 C, 2250 mAh, XT60 | 1 | Motor + logic power source |
-| LM2596 buck converter | 1 | Steps 14.8 V down to 5 V for ESP32 |
+| 3S 11.1 V LiPo, 30 C, 2200 mAh | 1 | Motor + logic power source |
+| LM2596 buck converter | 1 | Steps 11.1 V down to 5 V for ESP32 |
 | FingerTech 2.5" Shore A20 urethane sumo wheel | 4 | Fixed (no steering) — tank drive only |
 
 ### Mechanical / Drive
 - **4 motors, fixed wheels, tank drive.** Steering by spinning each side in opposite directions (skid steer / differential drive).
 - **Push-only.** No active weapon. The whole robot body is the pushing surface.
-- Two motors per side are driven as one logical unit (same direction, same speed) by a single BTS7960.
+- Two motors per side are driven by a single ZK-BM1 dual-channel driver (one channel per motor, same duty).
 
 ### Robot Class
 - **~4 kg robot, ~40 × 40 × 40 cm envelope.** No formal competition ruleset compliance required (hobby driving). No mandatory start delay, no required edge/line detection.
@@ -60,18 +60,18 @@ The hardware design is fixed and parts have been selected. There is no existing 
 - No safety-of-life requirements, but motors are high-current and the robot is heavy enough to cause damage — fail-stop on disconnect is mandatory
 
 ## Assumptions
-- The two motors on the same side are wired in parallel into a single BTS7960 channel and behave as a single actuator.
-- The BTS7960 is driven with two PWM signals (one per rotation direction) plus enable pins, controlled from ESP32 GPIO/LEDC.
+- The two motors on the same side are each driven by one channel of a ZK-BM1 dual-channel driver, both channels receiving the same command so they behave as a single actuator.
+- The ZK-BM1 is driven with four PWM signals per side (IN1/IN2 for motor 1, IN3/IN4 for motor 2) controlled from ESP32 GPIO/LEDC.
 - The Xbox controller exposes the standard HID gamepad mapping over BLE that the ESP32 BLE-HID stack can parse.
 - Battery voltage is sensed via a resistor divider into an ADC pin (to be defined in design).
 - Tuning will be done on a bench, not mid-match.
 
 ## Resolved Decisions
 - **BLE-HID library:** **Bluepad32** — mature library for ESP32-as-host receiving from Xbox Series controllers.
-- **BTS7960 current sensing (IS pins):** **Deferred to v2** — brownout failsafe covers the most common failure path; revisit once the bot is driving.
+- **BTS7960 current sensing (IS pins):** **N/A** — replaced BTS7960 with ZK-BM1 drivers. ZK-BM1 does not have current-sense pins.
 - **LED status vocabulary:** **Monochrome blink patterns on the onboard GPIO LED** (no RGB LED in BOM).
 - **Telemetry transport:** **USB-serial only for v1** — bench tuning over USB; BLE/UART broadcast deferred.
 
 ---
 *Created: 2026-05-20*
-*Last Updated: 2026-05-20*
+*Last Updated: 2026-06-26*

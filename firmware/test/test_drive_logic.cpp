@@ -103,15 +103,17 @@ static void test_pipeline() {
     DriveOutput fwd = drive_pipeline(snap(512, 0, 0), p, true);
     CHECK(fwd.left.enable);
     CHECK(fwd.right.enable);
-    CHECK(fwd.left.rpwm_duty > 0);
+    // Left side is inverted (motors mounted mirrored)
+    CHECK(fwd.left.lpwm_duty > 0);
     CHECK(fwd.right.rpwm_duty > 0);
-    CHECK_EQ(0, fwd.left.lpwm_duty);
+    CHECK_EQ(0, fwd.left.rpwm_duty);
     CHECK_EQ(0, fwd.right.lpwm_duty);
 
     DriveOutput pivot = drive_pipeline(snap(0, 512, 0), p, true);
-    CHECK(pivot.left.rpwm_duty > 0);   // left forward
-    CHECK_EQ(0, pivot.left.lpwm_duty);
-    CHECK(pivot.right.lpwm_duty > 0);  // right reverse
+    // Steer right: left forward (lpwm due to inversion), right reverse
+    CHECK(pivot.left.lpwm_duty > 0);
+    CHECK_EQ(0, pivot.left.rpwm_duty);
+    CHECK(pivot.right.lpwm_duty > 0);
     CHECK_EQ(0, pivot.right.rpwm_duty);
 
     // ARMED gate holds across the whole path

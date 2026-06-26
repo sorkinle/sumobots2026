@@ -1,45 +1,55 @@
 #include "motor_pair.h"
 
 namespace {
-constexpr uint32_t kPwmFreqHz = 20000;  // 20 kHz, above the audible band
+constexpr uint32_t kPwmFreqHz = 20000;  // 20 kHz — above audible range
 constexpr uint8_t  kPwmBits   = 10;     // 0..1023, matches DriveParams::max_power
 }  // namespace
 
-void MotorPair::begin(int rpwm_gpio, int lpwm_gpio, int en_gpio,
-                      uint8_t ledc_ch_r, uint8_t ledc_ch_l) {
-    rpwm_ = rpwm_gpio;
-    lpwm_ = lpwm_gpio;
-    en_   = en_gpio;
-    ch_r_ = ledc_ch_r;
-    ch_l_ = ledc_ch_l;
-
-    pinMode(en_, OUTPUT);
-    digitalWrite(en_, LOW);  // start disabled (motors off)
+void MotorPair::begin(int m1_fwd_gpio, int m1_rev_gpio,
+                      int m2_fwd_gpio, int m2_rev_gpio,
+                      uint8_t ch0, uint8_t ch1, uint8_t ch2, uint8_t ch3) {
+    m1_fwd_ = m1_fwd_gpio;
+    m1_rev_ = m1_rev_gpio;
+    m2_fwd_ = m2_fwd_gpio;
+    m2_rev_ = m2_rev_gpio;
+    ch_[0] = ch0; ch_[1] = ch1; ch_[2] = ch2; ch_[3] = ch3;
 
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-    // ESP32 Arduino core 3.x: pin-based LEDC API.
-    ledcAttach(rpwm_, kPwmFreqHz, kPwmBits);
-    ledcAttach(lpwm_, kPwmFreqHz, kPwmBits);
-    ledcWrite(rpwm_, 0);
-    ledcWrite(lpwm_, 0);
+    ledcAttach(m1_fwd_, kPwmFreqHz, kPwmBits);
+    ledcAttach(m1_rev_, kPwmFreqHz, kPwmBits);
+    ledcAttach(m2_fwd_, kPwmFreqHz, kPwmBits);
+    ledcAttach(m2_rev_, kPwmFreqHz, kPwmBits);
+    ledcWrite(m1_fwd_, 0);
+    ledcWrite(m1_rev_, 0);
+    ledcWrite(m2_fwd_, 0);
+    ledcWrite(m2_rev_, 0);
 #else
-    // ESP32 Arduino core 2.x: channel-based LEDC API.
-    ledcSetup(ch_r_, kPwmFreqHz, kPwmBits);
-    ledcSetup(ch_l_, kPwmFreqHz, kPwmBits);
-    ledcAttachPin(rpwm_, ch_r_);
-    ledcAttachPin(lpwm_, ch_l_);
-    ledcWrite(ch_r_, 0);
-    ledcWrite(ch_l_, 0);
+    ledcSetup(ch_[0], kPwmFreqHz, kPwmBits);
+    ledcSetup(ch_[1], kPwmFreqHz, kPwmBits);
+    ledcSetup(ch_[2], kPwmFreqHz, kPwmBits);
+    ledcSetup(ch_[3], kPwmFreqHz, kPwmBits);
+    ledcAttachPin(m1_fwd_, ch_[0]);
+    ledcAttachPin(m1_rev_, ch_[1]);
+    ledcAttachPin(m2_fwd_, ch_[2]);
+    ledcAttachPin(m2_rev_, ch_[3]);
+    ledcWrite(ch_[0], 0);
+    ledcWrite(ch_[1], 0);
+    ledcWrite(ch_[2], 0);
+    ledcWrite(ch_[3], 0);
 #endif
 }
 
 void MotorPair::apply(const MotorSignals& s) {
-    digitalWrite(en_, s.enable ? HIGH : LOW);
+    // Both motors on this side get the same signal
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
-    ledcWrite(rpwm_, s.rpwm_duty);
-    ledcWrite(lpwm_, s.lpwm_duty);
+    ledcWrite(m1_fwd_, s.rpwm_duty);
+    ledcWrite(m1_rev_, s.lpwm_duty);
+    ledcWrite(m2_fwd_, s.rpwm_duty);
+    ledcWrite(m2_rev_, s.lpwm_duty);
 #else
-    ledcWrite(ch_r_, s.rpwm_duty);
-    ledcWrite(ch_l_, s.lpwm_duty);
+    ledcWrite(ch_[0], s.rpwm_duty);
+    ledcWrite(ch_[1], s.lpwm_duty);
+    ledcWrite(ch_[2], s.rpwm_duty);
+    ledcWrite(ch_[3], s.lpwm_duty);
 #endif
 }

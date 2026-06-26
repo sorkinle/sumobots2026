@@ -35,7 +35,7 @@ struct DriveCommand {
 // Pure: controller input -> per-side signed PWM command.
 DriveCommand mixer_compute(const ControllerSnapshot& s, const DriveParams& p);
 
-// ---- Motor-driver signals (one BTS7960 side) ------------------------------
+// ---- Motor-driver signals (one ZK-BM1 side) ------------------------------
 struct MotorSignals {
     uint16_t rpwm_duty = 0;  // forward duty (cmd >= 0)
     uint16_t lpwm_duty = 0;  // reverse duty (cmd <  0)

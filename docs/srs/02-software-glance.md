@@ -12,7 +12,7 @@ The system under specification is **the firmware running on the ESP32**. Everyth
 │   OUTSIDE BOUNDARY (environment / hardware) │
 │                                             │
 │   Operator   Xbox Controller   Opponent     │
-│   Battery    BTS7960 drivers   Motors       │
+│   Battery    ZK-BM1 drivers    Motors       │
 │   Chassis    USB host (PC)     LED          │
 └─────────────────────────────────────────────┘
                       ▲
@@ -30,13 +30,13 @@ The system under specification is **the firmware running on the ESP32**. Everyth
 |-------|-----------|-----------|--------------|
 | **Operator** | Indirect (via controller and LED) | n/a | Intent (drive, arm, e-stop); reads LED state |
 | **Xbox Series controller** | ↔ Firmware | Bluetooth LE (HID GATT) | Stick / trigger / button events; link state |
-| **BTS7960 pair (Left + Right)** | ← Firmware | ESP32 GPIO: RPWM, LPWM, R_EN, L_EN per side | Direction + PWM duty + enable |
-| **Battery (4S LiPo via divider)** | → Firmware | ESP32 ADC pin | Pack voltage (for brownout / low-batt) |
+| **ZK-BM1 pair (Left + Right)** | ← Firmware | ESP32 GPIO: IN1, IN2, IN3, IN4 per side (PWM) | Direction + PWM duty |
+| **Battery (3S LiPo via divider)** | → Firmware | ESP32 ADC pin | Pack voltage (for brownout / low-batt) |
 | **Status LED (onboard or GPIO LED)** | ← Firmware | GPIO | Visible state pattern |
 | **USB host (PC) — bench only** | ↔ Firmware | USB CDC serial (UART0) | Telemetry stream out; tuning/admin commands in |
-| **Motors (×4)** | (indirect) | via BTS7960 only | n/a — firmware never touches motors directly |
+| **Motors (×4)** | (indirect) | via ZK-BM1 only | n/a — firmware never touches motors directly |
 
-The firmware never directly controls the motors or the battery; it acts **through** the BTS7960 drivers and reads the battery **through** an ADC divider.
+The firmware never directly controls the motors or the battery; it acts **through** the ZK-BM1 drivers and reads the battery **through** an ADC divider.
 
 ## Operating Modes (high-level state)
 
@@ -56,7 +56,7 @@ Arming requires an explicit operator action; coming out of `BOOT`, `PAIRING`, or
 |--:|-----------|------|
 | 1 | **BLE Controller Interface** | Pairs / reconnects with the Xbox controller; parses HID gamepad reports into a normalized input record (sticks, triggers, buttons, link health). |
 | 2 | **Drive Mixer** | Converts operator input into per-side wheel commands in the range −1.0 … +1.0 using a configurable mapping (arcade or tank). Applies deadband, throttle curve, and output clamp. |
-| 3 | **Motor Output Driver** | Abstracts the BTS7960 pair. Given `(left_cmd, right_cmd, enabled)`, produces direction + PWM duty + enable signals on the assigned GPIOs. The only component that touches motor GPIOs. |
+| 3 | **Motor Output Driver** | Abstracts the ZK-BM1 pair. Given `(left_cmd, right_cmd, enabled)`, produces direction + PWM duty signals on the assigned GPIOs. The only component that touches motor GPIOs. |
 | 4 | **State Machine (Arm / Disarm)** | Owns mode transitions and gates the Motor Output Driver behind `ARMED`. Listens to operator arm/disarm/e-stop, link-loss events, and fault signals. |
 | 5 | **Failsafe / Watchdog** | Monitors link liveness (heartbeat / timeout), pack voltage (brownout threshold), and optionally driver temperature / current. Asserts a fault signal that forces `FAULT` mode. |
 | 6 | **Configuration Store** | Reads/writes tunable parameters (deadband, max power, slew, curve, pin map) from ESP32 NVS. Exposes get/set/save/load to the Serial Console. |
@@ -75,8 +75,8 @@ Arming requires an explicit operator action; coming out of `BOOT`, `PAIRING`, or
                 │   ② Drive Mixer ◄──── ⑥ Configuration Store ◄──┐                │
                 │            │ L/R cmd                              │              │
                 │            ▼                                      │ params       │
-                │   ④ State Machine ───gate (armed?)────►③ Motor Output Driver ───┼──► BTS7960 ×2
-                │     ▲    ▲          ▲                                            │   (GPIO PWM/DIR/EN)
+                │   ④ State Machine ───gate (armed?)────►③ Motor Output Driver ───┼──► ZK-BM1 ×2
+                │     ▲    ▲          ▲                                            │   (GPIO PWM)
                 │     │    │          │ fault                                      │
                 │     │    └────── ⑤ Failsafe / Watchdog ◄──── Vbatt (ADC) ◄──────┼──── Battery divider
                 │     │                  ▲                                         │
@@ -122,4 +122,4 @@ Every CP has at least one component on the hook — no orphan problems at the ar
 
 ---
 *Created: 2026-05-20*
-*Last Updated: 2026-05-20*
+*Last Updated: 2026-06-26*

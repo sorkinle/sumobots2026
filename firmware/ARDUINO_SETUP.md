@@ -63,11 +63,11 @@ Monitor should print `Controller connected`.
 
 1. **With no motor drivers connected**, hold **LB + RB** and move the sticks. The Serial Monitor should show
    `armed=1` and the per-side duties changing. This proves Controller → ESP32 with zero risk.
-2. **Then wire the BTS7960 driver(s)** (pin map in [`README.md`](README.md)), robot **up on blocks** (wheels
+2. **Then wire the ZK-BM1 driver(s)** (pin map in [`README.md`](README.md)), robot **up on blocks** (wheels
    off the ground), and repeat. Motors run **only while LB + RB are held**; release to stop.
 
 A single motor is enough to test — connect it to one side's driver; the other side's pins just toggle
-harmlessly. If a side spins the wrong way, swap that side's `M+/M−` (or its RPWM/LPWM wires).
+harmlessly. If a side spins the wrong way, swap that side's motor leads.
 
 ## Troubleshooting
 
@@ -77,6 +77,6 @@ harmlessly. If a side spins the wrong way, swap that side's `M+/M−` (or its RP
 | No COM port in **Tools → Port** | Install the CP210x/CH340 driver (step 3); try a different USB cable (must be data, not charge-only). |
 | Upload stuck at "Connecting…" | Hold the **BOOT** button during upload; lower Upload Speed to 115200. |
 | Controller never connects | Use a BLE-capable Xbox controller; update its firmware via the Xbox Accessories app. To clear stale pairings, uncomment `BP32.forgetBluetoothKeys();` in `setup()`, upload once, then re-comment. |
-| Motor never spins | You must hold **LB + RB** to arm (the `EN` pin only goes HIGH when armed); check common ground between ESP32 and driver, and that the driver's logic VCC is powered. |
+| Motor never spins | You must hold **LB + RB** to arm; check common ground between ESP32 and driver, and that the driver's VCC is powered. |
 
 For host-side unit tests (no board needed), see the "Host tests" section of [`README.md`](README.md).

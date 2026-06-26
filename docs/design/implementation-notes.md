@@ -14,28 +14,26 @@ From `docs/srs/00-context.md` (fixed):
 | # | Item | Quantity |
 |---|------|---------:|
 | 1 | Pololu 37D metal-gear motor with encoder (encoder ignored by firmware) | 4 |
-| 2 | BTS7960 43 A dual H-bridge driver | 2 |
+| 2 | ZK-BM1 10 A dual-channel H-bridge driver | 2 |
 | 3 | ESP-WROOM-32 dev board | 1 |
-| 4 | Zeee 4 S 14.8 V 2 250 mAh LiPo | 1 |
-| 5 | LM2596 buck (5 V rail for ESP32 + LED + driver logic) | 1 |
+| 4 | 3S 11.1 V 2 200 mAh 30 C LiPo | 1 |
+| 5 | LM2596 buck (5 V rail for ESP32) | 1 |
 | 6 | FingerTech 2.5″ Shore A20 wheel | 4 |
 
 **Wiring topology**
 
 ```
-                   [4S LiPo 14.8V]
+                   [3S LiPo 11.1V]
                   ┌──────┬───────┐
                   │      │       │
                   ▼      ▼       ▼
-        BTS7960-L  BTS7960-R   LM2596 → 5V
-        (drives    (drives      ├─ ESP-WROOM-32 (VIN/USB Vbus)
-         L1, L2)    R1, R2)     ├─ Status LED (via current-limit R)
-                                └─ BTS7960 VCC (logic)
+        ZK-BM1-L  ZK-BM1-R   LM2596 → 5V
+        (drives    (drives      └─ ESP-WROOM-32 (VIN)
+         L1, L2)    R1, R2)
               All grounds tied to common GND
-        Vbatt sense: divider 22k / 4.7k from V+ to GND → ADC pin
 ```
 
-The two motors on each side wire to one BTS7960's M+/M− outputs in parallel — they are commanded as one logical actuator per side ("Left" / "Right"). This is what the SRS calls *Motor Output* per side.
+Each ZK-BM1 is a dual-channel driver. Each motor gets its own channel (IN1/IN2 and IN3/IN4), both commanded with the same duty so the two motors on a side act as one logical actuator ("Left" / "Right"). Unlike the BTS7960, the ZK-BM1 has no separate EN pin and no separate logic-voltage input — a single VCC supplies both power and logic.
 
 ---
 
@@ -45,32 +43,34 @@ ESP-WROOM-32 (DevKitC) pinout. All PWM is via ESP32 LEDC peripheral (hardware PW
 
 | Function | GPIO | Direction | Peripheral / Notes |
 |---|---:|---|---|
-| **Left  – RPWM** (forward duty) | 25 | Output, PWM | LEDC ch 0, 20 kHz, 10-bit |
-| **Left  – LPWM** (reverse duty) | 26 | Output, PWM | LEDC ch 1, 20 kHz, 10-bit |
-| **Left  – EN** (R_EN + L_EN tied) | 27 | Output, digital | HIGH when ARMED, else LOW |
-| **Right – RPWM** | 32 | Output, PWM | LEDC ch 2, 20 kHz, 10-bit |
-| **Right – LPWM** | 33 | Output, PWM | LEDC ch 3, 20 kHz, 10-bit |
-| **Right – EN** (R_EN + L_EN tied) | 14 | Output, digital | HIGH when ARMED, else LOW |
+| **Left  – IN1** (M1 forward) | 4 | Output, PWM | LEDC ch 0, 20 kHz, 10-bit |
+| **Left  – IN2** (M1 reverse) | 18 | Output, PWM | LEDC ch 1, 20 kHz, 10-bit |
+| **Left  – IN3** (M2 forward) | 19 | Output, PWM | LEDC ch 2, 20 kHz, 10-bit |
+| **Left  – IN4** (M2 reverse) | 21 | Output, PWM | LEDC ch 3, 20 kHz, 10-bit |
+| **Right – IN1** (M1 forward) | 25 | Output, PWM | LEDC ch 4, 20 kHz, 10-bit |
+| **Right – IN2** (M1 reverse) | 26 | Output, PWM | LEDC ch 5, 20 kHz, 10-bit |
+| **Right – IN3** (M2 forward) | 32 | Output, PWM | LEDC ch 6, 20 kHz, 10-bit |
+| **Right – IN4** (M2 reverse) | 33 | Output, PWM | LEDC ch 7, 20 kHz, 10-bit |
 | **Vbatt sense** | 34 | Input only, ADC1_CH6 | 22k / 4.7k divider, 11 dB atten |
 | **Status LED** | 2 | Output, digital | Onboard blue LED (DevKitC) |
 | **USB-serial** | – | – | UART0 via the dev board's USB-UART bridge |
 
 **Pin rationale**
 
-- All PWM/EN pins are output-capable GPIOs and avoid the strapping pins 0, 2, 12, 15 (except GPIO 2 used as LED only, which is fine — it's only an issue if held LOW at boot, and our default state is OFF/LOW after reset).
+- All PWM pins are output-capable GPIOs and avoid the strapping pins 0, 12, 15 (GPIO 2 is LED only — safe).
 - GPIO 34 is input-only and on ADC1, so it doesn't conflict with Wi-Fi or BLE (which monopolizes ADC2).
-- Tying R_EN and L_EN of each BTS7960 together is a deliberate simplification: the SRS only requires a single enable per side (one logical actuator).
+- Each ZK-BM1 uses 4 PWM signals (IN1–IN4), one per motor direction. No EN pin exists on this driver — motors stop when all PWM signals are zero.
 
 **Vbatt divider math** (22 kΩ top, 4.7 kΩ bottom)
 
 ```
 V_adc = V_batt × 4.7 / (22 + 4.7) = V_batt × 0.1760
-V_batt(max, full charge 4S) = 16.8 V → V_adc ≈ 2.96 V   ✅ within 3.3 V
-V_batt(default cutoff 13.2 V)        → V_adc ≈ 2.32 V
-V_batt(empty 3.0 V/cell)             → V_adc ≈ 2.11 V
+V_batt(max, full charge 3S) = 12.6 V → V_adc ≈ 2.22 V   ✅ within 3.3 V
+V_batt(default cutoff 9.9 V)         → V_adc ≈ 1.74 V
+V_batt(empty 3.0 V/cell)             → V_adc ≈ 1.58 V
 ```
 
-ADC1 with 11 dB attenuation has a useful range of ~150 mV to ~2.45 V (some calibration drift past that; consult the ESP-IDF ADC calibration appnote). Our window 2.1–3.0 V falls in the upper-saturation region — use **eFuse-based calibration** (`adc1_get_raw` + `esp_adc_cal_raw_to_voltage`) and verify against a multimeter at bring-up. If readings saturate, swap to **6 dB attenuation** and adjust the divider to e.g. 33 kΩ / 4.7 kΩ so V_adc(16.8 V) ≈ 2.10 V.
+ADC1 with 11 dB attenuation has a useful range of ~150 mV to ~2.45 V (some calibration drift past that; consult the ESP-IDF ADC calibration appnote). Our window 1.6–2.2 V falls comfortably in the linear region — use **eFuse-based calibration** (`adc1_get_raw` + `esp_adc_cal_raw_to_voltage`) and verify against a multimeter at bring-up.
 
 ---
 
@@ -106,7 +106,7 @@ firmware/
 │   │   ├── mixer.cpp/.h         # arcade/tank mapping, deadband, curve, slew
 │   │   └── state_machine.cpp/.h # BOOT / PAIRING / DISARMED / ARMED / FAULT
 │   ├── output/
-│   │   ├── motor_pair.cpp/.h    # BTS7960 driver, ARMED-gate guard
+│   │   ├── motor_pair.cpp/.h    # ZK-BM1 driver, ARMED-gate guard
 │   │   └── status_led.cpp/.h    # LED blink patterns per mode
 │   ├── safety/
 │   │   └── failsafe.cpp/.h      # FR-006 link-loss + FR-009 brownout (one Vbatt IIR)
@@ -214,45 +214,38 @@ clamp to [-max_power, +max_power]
 
 Deadband: any axis with `|raw| < deadband` is treated as 0. Curves are applied **after** deadband and **before** slew. Slew is per-tick: `out = clamp(prev + slew_sign × min(|target − prev|, slew), …)`.
 
-### 5.3 Output — BTS7960 Motor Pair (FR-010, NFR-003)
+### 5.3 Output — ZK-BM1 Motor Pair (FR-010, NFR-003)
 
 ```cpp
 // output/motor_pair.h
 class MotorPair {
 public:
-    void begin(int rpwm, int lpwm, int en, uint8_t ledc_ch_r, uint8_t ledc_ch_l);
+    void begin(int m1_fwd_gpio, int m1_rev_gpio,
+               int m2_fwd_gpio, int m2_rev_gpio,
+               uint8_t ch0, uint8_t ch1, uint8_t ch2, uint8_t ch3);
 
-    // The ONLY public method that writes PWM. The ARMED-gate guard lives here
-    // (NFR-003). Callers always invoke this — even when state != ARMED — so the
-    // guard sees every call.
-    void apply(int16_t signed_pwm, bool armed);
+    // The ONLY public method that writes PWM. Both motors on this side
+    // receive the same signal. The ARMED-gate guard is enforced upstream
+    // in drive_pipeline() (NFR-003).
+    void apply(const MotorSignals& s);
 private:
-    int rpwm_, lpwm_, en_;
-    uint8_t ch_r_, ch_l_;
+    int m1_fwd_, m1_rev_, m2_fwd_, m2_rev_;
+    uint8_t ch_[4];
 };
 
 // motor_pair.cpp:
-void MotorPair::apply(int16_t cmd, bool armed) {
-    if (!armed) {                    // ← single ARMED-gate guard
-        ledcWrite(ch_r_, 0);
-        ledcWrite(ch_l_, 0);
-        digitalWrite(en_, LOW);
-        return;
-    }
-    digitalWrite(en_, HIGH);
-    if (cmd >= 0) {
-        ledcWrite(ch_l_, 0);
-        ledcWrite(ch_r_, cmd);
-    } else {
-        ledcWrite(ch_r_, 0);
-        ledcWrite(ch_l_, -cmd);
-    }
+void MotorPair::apply(const MotorSignals& s) {
+    // Both motors on this side get the same signal
+    ledcWrite(m1_fwd_, s.rpwm_duty);
+    ledcWrite(m1_rev_, s.lpwm_duty);
+    ledcWrite(m2_fwd_, s.rpwm_duty);
+    ledcWrite(m2_rev_, s.lpwm_duty);
 }
 ```
 
-**Why this satisfies NFR-003:** there is exactly one code site that writes PWM (`ledcWrite` in `MotorPair::apply`), and the `!armed` early-return guards it. A grep for `ledcWrite(ch_r_|ch_l_` returns one method. Mutating the guard fails the state-injection unit test (`test/test_armed_gate.cpp`).
+**Why this satisfies NFR-003:** there is exactly one code site that writes PWM (`ledcWrite` in `MotorPair::apply`), and the ARMED gate upstream in `drive_pipeline()` ensures zero duty is passed when not armed. A grep for `ledcWrite` returns one method.
 
-**LEDC config:** `ledcSetup(channel, 20000, 10);` then `ledcAttachPin(gpio, channel);` in `begin()`. 20 kHz is above the audible band; 10-bit (0..1023) gives a workable resolution.
+**LEDC config:** `ledcAttach(gpio, 20000, 10);` in `begin()`. 20 kHz is above the audible band; 10-bit (0..1023) gives a workable resolution. Each ZK-BM1 uses 4 LEDC channels (one per PWM pin), 8 channels total for both sides.
 
 ### 5.4 State Machine (FR-004, FR-005, FR-006, FR-009, FR-010, FR-019)
 
@@ -363,7 +356,7 @@ bool   params_set_by_name(Params& p, const char* key, const char* val_str);
 | slew | 80 | 1–1023 |
 | curve_type | 1 (expo) | 0–2 |
 | curve_factor | 50 | 0–100 |
-| vbatt_threshold | 13.2 V | 11.0–16.8 |
+| vbatt_threshold | 9.9 V | 8.0–12.6 |
 | vbatt_filter_ms | 500 | 50–5000 |
 | linkloss_timeout_ms | 250 | 50–2000 |
 | arm_hold_ms | 1000 | 200–5000 |
@@ -439,8 +432,8 @@ Do these in order on the bench. Each step gives a binary "go / no-go" before add
 |---|---|---|
 | 1 | Flash a blink-only sketch using the agreed pin map | Onboard LED on GPIO 2 blinks |
 | 2 | Flash a sketch reading the Vbatt divider and printing volts every 100 ms | Reported voltage matches DMM ± 0.2 V across 12–16 V |
-| 3 | Disconnect motors (BTS7960 unpowered). Flash motor-test sketch that sweeps `MotorPair::apply` from −500 to +500 to 0 with `armed=true`. Probe RPWM/LPWM with a scope or LED test rig. | RPWM goes high-duty when cmd>0; LPWM goes high-duty when cmd<0; both low at cmd=0 |
-| 4 | Connect motors with **no wheels installed**, robot up on blocks, BTS7960 logic powered, drivers' main rail unpowered. Re-run motor-test. | Confirms wiring is correct without risk |
+| 3 | Disconnect motors (ZK-BM1 unpowered). Flash motor-test sketch that sweeps `MotorPair::apply` from −500 to +500 to 0 with `armed=true`. Probe IN1/IN2/IN3/IN4 with a scope or LED test rig. | IN1 goes high-duty when cmd>0; IN2 goes high-duty when cmd<0; both low at cmd=0 (same for IN3/IN4) |
+| 4 | Connect motors with **no wheels installed**, robot up on blocks, ZK-BM1 logic powered, drivers' main rail unpowered. Re-run motor-test. | Confirms wiring is correct without risk |
 | 5 | Energize drivers. Repeat motor-test at low duty (max 200). | Motors spin in expected direction; reverse polarity if not |
 | 6 | Flash full firmware. Pair controller (first-time pairing flow). | LED PAIRING → DISARMED |
 | 7 | Verify arm/disarm gestures and B-button e-stop. | LED + motor behavior matches §6 |
@@ -481,7 +474,7 @@ Unit-testable items (mixer, state machine, command parser) are written as **Ardu
 
 ## 9. Open Implementation Choices (Deliberately Deferred)
 
-1. **Current sensing.** BTS7960 has an IS (current-sense) output per half-bridge. The SRS deferred this (00-context.md). When added, route to GPIO 35 and 39 (ADC1), then add a third element to `Faults` and a corresponding FR. No SRS change needed for the deferred plumbing.
+1. **Current sensing.** The ZK-BM1 does not have a current-sense output. If current monitoring is needed, add an external shunt + INA219 module, route to GPIO 35 and 39 (ADC1), then add a third element to `Faults` and a corresponding FR.
 2. **OTA updates.** Out of scope for v1. The 1 MB flash budget (NFR-006) leaves room for a 2-app + OTA partition table in a future revision.
 3. **IMU / orientation.** Explicitly out of scope.
 4. **PWM frequency.** 20 kHz is a starting point. If MOSFET drive at 20 kHz proves wasteful (thermal), drop to 15 kHz (still inaudible to most) and re-measure.
@@ -508,5 +501,5 @@ Every FR/NFR has a home. Every implementation section justifies its existence by
 
 ---
 *Created: 2026-05-20*
-*Last Updated: 2026-06-17*
+*Last Updated: 2026-06-26*
 *Author: Project Owner*

@@ -53,7 +53,8 @@ MotorSignals motor_output_for(int16_t signed_pwm, bool armed) {
 DriveOutput drive_pipeline(const ControllerSnapshot& s, const DriveParams& p, bool armed) {
     const DriveCommand cmd = mixer_compute(s, p);
     DriveOutput out;
-    out.left  = motor_output_for(cmd.left, armed);
+    // Left motors are mounted mirrored — negate to match physical direction.
+    out.left  = motor_output_for(-cmd.left, armed);
     out.right = motor_output_for(cmd.right, armed);
     return out;
 }
