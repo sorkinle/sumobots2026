@@ -2,15 +2,24 @@
 //
 // Connection test ONLY: Xbox controller (Bluetooth LE) -> ESP32 -> ZK-BM1
 // drivers -> motors. It proves the end-to-end drive path and nothing else
-// (no arm/disarm state machine, failsafe, telemetry, or NVS yet).
+// (no full arm/disarm state machine or telemetry yet; the only persisted state
+// is the drive state held in RAM while connected).
 //
-// SAFETY: motors run ONLY while you hold LB + RB together (the arm gesture for
-// this test). Release either shoulder and both sides stop immediately. Always
-// bench-test with the robot up on blocks (wheels off the ground) first and at
-// low max_power. See firmware/README.md and docs/design/implementation-notes.md.
+// CONTROLS: the robot drives whenever a controller is connected. Tap/hold A to
+// stop — it fires a brief reverse "plug brake" pulse to kill momentum (the
+// motors have no brake and otherwise coast), then holds stopped while still
+// letting you turn in place. Motors stop immediately if the controller
+// disconnects.
+//
+// PAIRING: open mode for this connection-test sketch. Any BLE gamepad that
+// Bluepad32 recognizes may connect; only one active controller is used at a
+// time for driving.
+//
+// SAFETY: there is no hold-to-arm gesture — motion is live while connected.
+// Always bench-test with the robot up on blocks (wheels off the ground) first
+// and at low max_power. See firmware/README.md and docs/design/implementation-notes.md.
 
 #include <Bluepad32.h>
-
 #include "drive_logic.h"
 #include "motor_pair.h"
 
@@ -29,9 +38,20 @@ DriveParams g_params;            // compiled-in defaults (see drive_logic.h)
 ControllerPtr g_ctl = nullptr;
 
 static void onConnect(ControllerPtr ctl) {
+    const ControllerProperties props = ctl->getProperties();
     if (g_ctl == nullptr) {
         g_ctl = ctl;
-        Serial.println("Controller connected");
+        Serial.printf("Controller connected: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      props.btaddr[0], props.btaddr[1], props.btaddr[2],
+                      props.btaddr[3], props.btaddr[4], props.btaddr[5]);
+        return;
+    }
+
+    if (g_ctl != ctl) {
+        Serial.printf("Ignoring extra controller: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                      props.btaddr[0], props.btaddr[1], props.btaddr[2],
+                      props.btaddr[3], props.btaddr[4], props.btaddr[5]);
+        ctl->disconnect();
     }
 }
 
@@ -75,14 +95,21 @@ static void debugPrint(const ControllerSnapshot& s, bool armed, const DriveOutpu
 
 void setup() {
     Serial.begin(115200);
-    Serial.println("Sumobot connection test - hold LB+RB to arm");
+    Serial.println("Sumobot connection test - drives while connected; hold A to stop");
+
+    // Drive power: default to full scale. Force it to max if it came up unset
+    // (e.g. a future NVS/config load returning 0) so the robot never runs at
+    // zero power by accident.
+    if (g_params.max_power == 0) {
+        g_params.max_power = 1023;  // 10-bit PWM full scale
+    }
 
     g_left.begin(L_M1_FWD, L_M1_REV, L_M2_FWD, L_M2_REV, 0, 1, 2, 3);
     g_right.begin(R_M1_FWD, R_M1_REV, R_M2_FWD, R_M2_REV, 4, 5, 6, 7);
 
-    // If pairing ever gets stuck during bring-up, uncomment once to wipe keys:
-    // BP32.forgetBluetoothKeys();
     BP32.setup(&onConnect, &onDisconnect);
+    BP32.enableNewBluetoothConnections(true);
+    Serial.println("Waiting for any compatible controller to pair/connect");
 }
 
 void loop() {
@@ -93,28 +120,28 @@ void loop() {
     // motors get pulsed ON/OFF causing flickering.
     static ControllerSnapshot snap;  // default: invalid, all-zero
     static bool armed = false;
-    static uint32_t last_data_ms = 0;
+    static DriveState drive_state;   // per-side slew-limiter + brake state
+    static uint32_t last_loop_ms = 0;
 
-    constexpr uint32_t kTimeoutMs = 5000;  // failsafe: stop if no data for 5 seconds
+    // Elapsed time since the previous loop, for the button-A reverse-brake timer.
+    const uint32_t now_ms = millis();
+    const uint32_t dt_ms  = last_loop_ms ? (now_ms - last_loop_ms) : 0;
+    last_loop_ms = now_ms;
 
     if (g_ctl && g_ctl->isConnected()) {
         if (g_ctl->hasData() && g_ctl->isGamepad()) {
             snap = snapshotFrom(g_ctl);
-            armed = (snap.buttons & (btn::LB | btn::RB)) == (btn::LB | btn::RB);
-            last_data_ms = millis();
-        } else if (last_data_ms > 0 && millis() - last_data_ms > kTimeoutMs) {
-            // No fresh data for too long — failsafe stop.
-            snap = ControllerSnapshot{};
-            armed = false;
+            armed = true;
         }
+        // else: no fresh frame this loop (normal at ~100 Hz vs ~20-50 Hz BT) —
+        // keep the last snapshot so the motors don't stutter.
     } else {
-        // Controller disconnected — zero everything.
+        // Gamepad disconnected — stop. The single ARMED gate zeroes output.
         snap = ControllerSnapshot{};
         armed = false;
-        last_data_ms = 0;
     }
 
-    const DriveOutput out = drive_pipeline(snap, g_params, armed);
+    const DriveOutput out = drive_pipeline(snap, g_params, armed, dt_ms, drive_state);
     g_left.apply(out.left);
     g_right.apply(out.right);
 

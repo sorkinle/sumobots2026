@@ -56,15 +56,18 @@ Click **Upload** (→). On first flash some boards need you to hold the **BOOT**
 
 ## 7. Pair the controller
 
-Turn the controller on, then press its **pair button** until the Xbox logo flashes quickly. The Serial
-Monitor should print `Controller connected`.
+Turn the controller on and hold its **pair** button until the Xbox logo flashes
+quickly. Serial Monitor prints that it is waiting for any compatible
+controller, then logs the controller MAC when connected.
 
 ## 8. First run — smoke-test order (safe)
 
-1. **With no motor drivers connected**, hold **LB + RB** and move the sticks. The Serial Monitor should show
-   `armed=1` and the per-side duties changing. This proves Controller → ESP32 with zero risk.
+1. **With no motor drivers connected**, move the sticks. The Serial Monitor should show `armed=1` (whenever a
+   controller is connected) and the per-side duties changing. This proves Controller → ESP32 with zero risk.
 2. **Then wire the ZK-BM1 driver(s)** (pin map in [`README.md`](README.md)), robot **up on blocks** (wheels
-   off the ground), and repeat. Motors run **only while LB + RB are held**; release to stop.
+   off the ground), and repeat. The robot drives whenever the controller is connected — **press A** to brake
+   and stop (a brief reverse pulse kills momentum; you can still turn in place), and the motors stop the
+   instant the controller disconnects.
 
 A single motor is enough to test — connect it to one side's driver; the other side's pins just toggle
 harmlessly. If a side spins the wrong way, swap that side's motor leads.
@@ -76,7 +79,8 @@ harmlessly. If a side spins the wrong way, swap that side's motor leads.
 | `Bluepad32.h: No such file or directory` | You selected a plain "ESP32 Arduino" board. Re-select it under **ESP32 + Bluepad32 Arduino** (step 5). |
 | No COM port in **Tools → Port** | Install the CP210x/CH340 driver (step 3); try a different USB cable (must be data, not charge-only). |
 | Upload stuck at "Connecting…" | Hold the **BOOT** button during upload; lower Upload Speed to 115200. |
-| Controller never connects | Use a BLE-capable Xbox controller; update its firmware via the Xbox Accessories app. To clear stale pairings, uncomment `BP32.forgetBluetoothKeys();` in `setup()`, upload once, then re-comment. |
-| Motor never spins | You must hold **LB + RB** to arm; check common ground between ESP32 and driver, and that the driver's VCC is powered. |
+| Controller never connects | Use a BLE-capable Xbox controller, update its firmware via the Xbox Accessories app, and make sure the board is selected from **ESP32 + Bluepad32 Arduino**. |
+| A second controller won't connect | The sketch keeps one active driver at a time. Disconnect/power off the active controller, then pair the other one. |
+| Motor never spins | Make sure a controller is connected (Serial shows `armed=1`) and you are not pressing **A** (which brakes/stops the robot); check common ground between ESP32 and driver, and that the driver's VCC is powered. |
 
 For host-side unit tests (no board needed), see the "Host tests" section of [`README.md`](README.md).
