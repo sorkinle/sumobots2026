@@ -59,6 +59,9 @@ Click **Upload** (→). On first flash some boards need you to hold the **BOOT**
 Turn the controller on and hold its **pair** button until the Xbox logo flashes
 quickly. Serial Monitor prints that it is waiting for any compatible
 controller, then logs the controller MAC when connected.
+The sketch disables any Bluetooth MAC allowlist saved by older firmware, so
+changing controllers does not require erasing the board's flash. Only one
+controller drives at a time; turn off the active controller before pairing another.
 
 ## 8. First run — smoke-test order (safe)
 
@@ -84,3 +87,7 @@ harmlessly. If a side spins the wrong way, swap that side's motor leads.
 | Motor never spins | Make sure a controller is connected (Serial shows `armed=1`) and you are not pressing **A** (which brakes/stops the robot); check common ground between ESP32 and driver, and that the driver's VCC is powered. |
 
 For host-side unit tests (no board needed), see the "Host tests" section of [`README.md`](README.md).
+
+---
+*Created: 2026-06-17*
+*Last Updated: 2026-11-09*

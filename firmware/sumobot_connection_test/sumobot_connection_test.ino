@@ -20,6 +20,7 @@
 // and at low max_power. See firmware/README.md and docs/design/implementation-notes.md.
 
 #include <Bluepad32.h>
+#include <bt/uni_bt_allowlist.h>
 #include "drive_logic.h"
 #include "motor_pair.h"
 
@@ -108,6 +109,10 @@ void setup() {
     g_right.begin(R_M1_FWD, R_M1_REV, R_M2_FWD, R_M2_REV, 4, 5, 6, 7);
 
     BP32.setup(&onConnect, &onDisconnect);
+    // Older firmware may have persisted a MAC allowlist in NVS.
+    if (uni_bt_allowlist_is_enabled()) {
+        uni_bt_allowlist_set_enabled(false);
+    }
     BP32.enableNewBluetoothConnections(true);
     Serial.println("Waiting for any compatible controller to pair/connect");
 }
@@ -120,13 +125,6 @@ void loop() {
     // motors get pulsed ON/OFF causing flickering.
     static ControllerSnapshot snap;  // default: invalid, all-zero
     static bool armed = false;
-    static DriveState drive_state;   // per-side slew-limiter + brake state
-    static uint32_t last_loop_ms = 0;
-
-    // Elapsed time since the previous loop, for the button-A reverse-brake timer.
-    const uint32_t now_ms = millis();
-    const uint32_t dt_ms  = last_loop_ms ? (now_ms - last_loop_ms) : 0;
-    last_loop_ms = now_ms;
 
     if (g_ctl && g_ctl->isConnected()) {
         if (g_ctl->hasData() && g_ctl->isGamepad()) {
@@ -141,7 +139,7 @@ void loop() {
         armed = false;
     }
 
-    const DriveOutput out = drive_pipeline(snap, g_params, armed, dt_ms, drive_state);
+    const DriveOutput out = drive_pipeline(snap, g_params, armed);
     g_left.apply(out.left);
     g_right.apply(out.right);
 
